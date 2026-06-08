@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sparandekalkylator med ränta på ränta | Svensk investeringskalkylator</title>
+    <meta
+      name="description"
+      content="Beräkna hur ditt sparande kan växa och hur mycket du behöver spara per månad för att nå ett sparmål med ränta-på-ränta."
+    />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Sparandekalkylator med ränta på ränta" />
+    <meta
+      property="og:description"
+      content="En modern svensk sparandekalkylator som visar slutvärde, sparmål, insatt kapital, avkastning och ett interaktivt årsdiagram."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#10231f" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Sparandekalkylator med ränta på ränta",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "sv-SE",
+        "description": "Beräkna långsiktigt sparande med startkapital, månadssparande, årlig avkastning och ränta-på-ränta."
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"]
+            },
+            colors: {
+              ink: "#10231f",
+              forest: "#16483f",
+              mint: "#9ee6c8",
+              limewash: "#edf8e8",
+              copper: "#b9693a",
+              skysoft: "#dceef7"
+            },
+            boxShadow: {
+              soft: "0 18px 60px rgba(16, 35, 31, 0.13)"
+            }
+          }
+        }
+      };
+    </script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-[#f7faf6] text-ink antialiased">
+    <noscript>
+      <main style="max-width: 760px; margin: 40px auto; padding: 24px; font-family: system-ui, sans-serif;">
+        <h1>Sparandekalkylator med ränta på ränta</h1>
+        <p>Aktivera JavaScript för att använda den interaktiva kalkylatorn och se diagrammet.</p>
+      </main>
+    </noscript>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useMemo, useState } = React;
+
+      const currency = new Intl.NumberFormat("sv-SE", {
+        style: "currency",
+        currency: "SEK",
+        maximumFractionDigits: 0
+      });
+
+      const percent = new Intl.NumberFormat("sv-SE", {
+        maximumFractionDigits: 2
+      });
+
+      function toNumber(value) {
+        const number = Number(String(value).replace(",", "."));
+        return Number.isFinite(number) ? number : 0;
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function calculateProjection(startCapital, monthlySaving, annualReturn, years) {
+        const yearlyReturn = annualReturn / 100;
+        const monthlyReturn = Math.pow(1 + yearlyReturn, 1 / 12) - 1;
+        let balance = startCapital;
+        let deposited = startCapital;
+        const rows = [
+          {
+            year: 0,
+            balance,
+            deposited,
+            gain: 0
+          }
+        ];
+
+        for (let year = 1; year <= years; year += 1) {
+          for (let month = 1; month <= 12; month += 1) {
+            balance = balance * (1 + monthlyReturn) + monthlySaving;
+            deposited += monthlySaving;
+          }
+
+          rows.push({
+            year,
+            balance,
+            deposited,
+            gain: Math.max(0, balance - deposited)
+          });
+        }
+
+        return rows;
+      }
+
+      function calculateGoal(startCapital, currentMonthlySaving, annualReturn, years, target) {
+        const months = Math.max(1, Math.round(years * 12));
+        const monthlyReturn = Math.pow(1 + annualReturn / 100, 1 / 12) - 1;
+        const startFutureValue = startCapital * Math.pow(1 + monthlyReturn, months);
+        const factor =
+          Math.abs(monthlyReturn) < 0.0000001
+            ? months
+            : (Math.pow(1 + monthlyReturn, months) - 1) / monthlyReturn;
+        const requiredMonthlySaving = Math.max(0, (target - startFutureValue) / factor);
+        const currentRows = calculateProjection(startCapital, currentMonthlySaving, annualReturn, years);
+        const withCurrentPlan = currentRows[currentRows.length - 1];
+        const requiredTotalDeposit = startCapital + requiredMonthlySaving * months;
+        const requiredFinalValue = Math.max(target, startFutureValue);
+
+        return {
+          requiredMonthlySaving,
+          requiredTotalDeposit,
+          expectedReturn: requiredFinalValue - requiredTotalDeposit,
+          currentFinalValue: withCurrentPlan.balance,
+          currentTotalDeposit: withCurrentPlan.deposited,
+          currentGain: withCurrentPlan.gain,
+          isRealisticNow: withCurrentPlan.balance >= target,
+          gap: target - withCurrentPlan.balance
+        };
+      }
+
+      function StatCard({ label, value, accent }) {
+        return (
+          <section className="rounded-lg border border-ink/10 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-ink/60">{label}</p>
+            <p className={`mt-2 text-2xl font-semibold tracking-normal ${accent || "text-ink"}`}>{value}</p>
+          </section>
+        );
+      }
+
+      function SectionIntro({ eyebrow, title, children }) {
+        return (
+          <div className="mb-6 max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-copper">{eyebrow}</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-normal sm:text-3xl">{title}</h2>
+            <p className="mt-3 leading-7 text-ink/70">{children}</p>
+          </div>
+        );
+      }
+
+      function Field({ label, value, setValue, min, max, step, suffix }) {
+        const id = label.toLowerCase().replaceAll(" ", "-");
+        return (
+          <label htmlFor={id} className="block">
+            <span className="mb-2 flex items-center justify-between text-sm font-semibold">
+              <span>{label}</span>
+              <span className="text-ink/50">{suffix}</span>
+            </span>
+            <input
+              id={id}
+              type="number"
+              inputMode="decimal"
+              min={min}
+              max={max}
+              step={step}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              className="h-12 w-full rounded-lg border border-ink/15 bg-white px-4 text-base font-medium outline-none transition focus:border-forest focus:ring-4 focus:ring-mint/30"
+            />
+          </label>
+        );
+      }
+
+      function ProjectionChart({ rows }) {
+        const [activeIndex, setActiveIndex] = useState(rows.length - 1);
+        const width = 920;
+        const height = 340;
+        const padding = { top: 24, right: 28, bottom: 48, left: 62 };
+        const innerWidth = width - padding.left - padding.right;
+        const innerHeight = height - padding.top - padding.bottom;
+        const maxValue = Math.max(...rows.map((row) => row.balance), 1);
+        const xFor = (index) => padding.left + (index / Math.max(rows.length - 1, 1)) * innerWidth;
+        const yFor = (value) => padding.top + innerHeight - (value / maxValue) * innerHeight;
+        const linePath = rows
+          .map((row, index) => `${index === 0 ? "M" : "L"} ${xFor(index)} ${yFor(row.balance)}`)
+          .join(" ");
+        const areaPath = `${linePath} L ${xFor(rows.length - 1)} ${height - padding.bottom} L ${padding.left} ${
+          height - padding.bottom
+        } Z`;
+        const chartIndex = clamp(activeIndex, 0, rows.length - 1);
+        const active = rows[chartIndex];
+
+        return (
+          <section className="rounded-lg border border-ink/10 bg-white p-4 shadow-soft sm:p-6">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">Utveckling år för år</h2>
+                <p className="text-sm text-ink/60">Dra eller klicka i diagrammet för att granska ett specifikt år.</p>
+              </div>
+              <div className="rounded-lg bg-limewash px-4 py-3 text-sm">
+                <span className="font-semibold">År {active.year}: </span>
+                {currency.format(active.balance)}
+              </div>
+            </div>
+            <div className="relative overflow-hidden rounded-lg border border-ink/10 bg-[#fbfdf9]">
+              <svg
+                viewBox={`0 0 ${width} ${height}`}
+                role="img"
+                aria-label="Linjediagram som visar sparandets utveckling år för år"
+                className="block h-auto w-full"
+                onMouseMove={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const x = ((event.clientX - rect.left) / rect.width) * width;
+                  const index = Math.round(clamp((x - padding.left) / innerWidth, 0, 1) * (rows.length - 1));
+                  setActiveIndex(index);
+                }}
+                onMouseLeave={() => setActiveIndex(rows.length - 1)}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const x = ((event.clientX - rect.left) / rect.width) * width;
+                  const index = Math.round(clamp((x - padding.left) / innerWidth, 0, 1) * (rows.length - 1));
+                  setActiveIndex(index);
+                }}
+              >
+                <defs>
+                  <linearGradient id="chartArea" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#9ee6c8" stopOpacity="0.65" />
+                    <stop offset="100%" stopColor="#9ee6c8" stopOpacity="0.05" />
+                  </linearGradient>
+                </defs>
+                {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+                  const y = padding.top + innerHeight * tick;
+                  const value = maxValue * (1 - tick);
+                  return (
+                    <g key={tick}>
+                      <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#d6e2dc" />
+                      <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-ink/50 text-[22px]">
+                        {Math.round(value / 1000)} tkr
+                      </text>
+                    </g>
+                  );
+                })}
+                <path d={areaPath} fill="url(#chartArea)" />
+                <path d={linePath} fill="none" stroke="#16483f" strokeWidth="6" strokeLinecap="round" />
+                <path
+                  d={rows.map((row, index) => `${index === 0 ? "M" : "L"} ${xFor(index)} ${yFor(row.deposited)}`).join(" ")}
+                  fill="none"
+                  stroke="#b9693a"
+                  strokeWidth="4"
+                  strokeDasharray="10 10"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1={xFor(chartIndex)}
+                  x2={xFor(chartIndex)}
+                  y1={padding.top}
+                  y2={height - padding.bottom}
+                  stroke="#10231f"
+                  strokeOpacity="0.18"
+                />
+                <circle cx={xFor(chartIndex)} cy={yFor(active.balance)} r="10" fill="#16483f" stroke="white" strokeWidth="4" />
+                {rows
+                  .filter((row) => row.year % Math.max(1, Math.ceil(rows.length / 7)) === 0 || row.year === rows.length - 1)
+                  .map((row) => (
+                    <text
+                      key={row.year}
+                      x={xFor(row.year)}
+                      y={height - 18}
+                      textAnchor="middle"
+                      className="fill-ink/50 text-[22px]"
+                    >
+                      {row.year}
+                    </text>
+                  ))}
+              </svg>
+            </div>
+            <div className="mt-4 grid gap-3 text-sm text-ink/70 sm:grid-cols-3">
+              <p><span className="font-semibold text-forest">Heldragen linje:</span> beräknat värde.</p>
+              <p><span className="font-semibold text-copper">Streckad linje:</span> totalt insatt kapital.</p>
+              <p><span className="font-semibold text-ink">Vinst:</span> skillnaden mellan värde och insättningar.</p>
+            </div>
+          </section>
+        );
+      }
+
+      function GoalPlanner({ parsed, parsedGoal, goalTarget, setGoalTarget, goalYears, setGoalYears, goal }) {
+        const gapIsPositive = goal.gap > 0;
+
+        return (
+          <section className="bg-[#eef7f5]">
+            <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+              <SectionIntro eyebrow="Nå ett sparmål" title="Räkna baklänges från ditt mål">
+                Ange hur stort kapital du vill ha och hur många år du har på dig. Kalkylatorn visar vilket
+                månadssparande som behövs med vald årlig avkastning, och jämför med ditt nuvarande månadssparande.
+              </SectionIntro>
+
+              <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+                <div className="rounded-lg border border-forest/15 bg-white p-5 shadow-sm sm:p-6">
+                  <div className="grid gap-4">
+                    <Field
+                      label="Sparmål"
+                      value={goalTarget}
+                      setValue={setGoalTarget}
+                      min="0"
+                      max="100000000"
+                      step="10000"
+                      suffix="kr"
+                    />
+                    <Field
+                      label="Antal år till mål"
+                      value={goalYears}
+                      setValue={setGoalYears}
+                      min="1"
+                      max="60"
+                      step="1"
+                      suffix="år"
+                    />
+                  </div>
+                  <div className="mt-5 rounded-lg bg-skysoft p-4 text-sm leading-6 text-ink/75">
+                    Målkalkylen använder samma startkapital och årliga avkastning som prognosen ovan:
+                    {" "}{currency.format(parsed.startCapital)} i startkapital och {percent.format(parsed.annualReturn)} %
+                    antagen avkastning per år.
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <section className="rounded-lg border border-forest/20 bg-forest p-5 text-white shadow-soft md:col-span-2">
+                    <p className="text-sm font-medium text-mint">Du behöver spara</p>
+                    <p className="mt-2 text-4xl font-bold tracking-normal sm:text-5xl">
+                      {currency.format(goal.requiredMonthlySaving)}
+                      <span className="ml-2 text-lg font-semibold text-white/70">/månad</span>
+                    </p>
+                    <p className="mt-4 max-w-3xl leading-7 text-white/75">
+                      För att nå {currency.format(parsedGoal.target)} på {parsedGoal.years} år med
+                      vald avkastning och nuvarande startkapital.
+                    </p>
+                  </section>
+
+                  <StatCard label="Total insättning för målet" value={currency.format(goal.requiredTotalDeposit)} />
+                  <StatCard label="Förväntad avkastning" value={currency.format(goal.expectedReturn)} accent="text-forest" />
+
+                  <section
+                    className={`rounded-lg border p-5 md:col-span-2 ${
+                      goal.isRealisticNow
+                        ? "border-forest/20 bg-limewash"
+                        : "border-copper/25 bg-[#fff7f0]"
+                    }`}
+                  >
+                    <p className={`text-sm font-semibold ${goal.isRealisticNow ? "text-forest" : "text-copper"}`}>
+                      {goal.isRealisticNow ? "Målet nås med nuvarande inställningar" : "Målet kräver högre månadssparande"}
+                    </p>
+                    <p className="mt-2 leading-7 text-ink/75">
+                      Med ditt nuvarande månadssparande på {currency.format(parsed.monthlySaving)} väntas kapitalet bli{" "}
+                      <span className="font-semibold text-ink">{currency.format(goal.currentFinalValue)}</span>.
+                      {goal.isRealisticNow
+                        ? ` Det är ${currency.format(Math.abs(goal.gap))} över målet.`
+                        : ` Det saknas ${currency.format(gapIsPositive ? goal.gap : 0)} jämfört med målet.`}
+                    </p>
+                    <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                      <div className="rounded-lg bg-white/70 p-3">
+                        <p className="text-ink/55">Nuvarande total insättning</p>
+                        <p className="mt-1 font-semibold">{currency.format(goal.currentTotalDeposit)}</p>
+                      </div>
+                      <div className="rounded-lg bg-white/70 p-3">
+                        <p className="text-ink/55">Nuvarande avkastning</p>
+                        <p className="mt-1 font-semibold">{currency.format(goal.currentGain)}</p>
+                      </div>
+                      <div className="rounded-lg bg-white/70 p-3">
+                        <p className="text-ink/55">Skillnad mot mål</p>
+                        <p className="mt-1 font-semibold">{currency.format(goal.currentFinalValue - parsedGoal.target)}</p>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+      }
+
+      function App() {
+        const [startCapital, setStartCapital] = useState("50000");
+        const [monthlySaving, setMonthlySaving] = useState("3000");
+        const [annualReturn, setAnnualReturn] = useState("7");
+        const [years, setYears] = useState("25");
+        const [goalTarget, setGoalTarget] = useState("1000000");
+        const [goalYears, setGoalYears] = useState("15");
+
+        const parsed = {
+          startCapital: clamp(toNumber(startCapital), 0, 100000000),
+          monthlySaving: clamp(toNumber(monthlySaving), 0, 1000000),
+          annualReturn: clamp(toNumber(annualReturn), -50, 50),
+          years: Math.round(clamp(toNumber(years), 1, 60))
+        };
+
+        const rows = useMemo(
+          () => calculateProjection(parsed.startCapital, parsed.monthlySaving, parsed.annualReturn, parsed.years),
+          [parsed.startCapital, parsed.monthlySaving, parsed.annualReturn, parsed.years]
+        );
+        const final = rows[rows.length - 1];
+        const parsedGoal = {
+          target: clamp(toNumber(goalTarget), 0, 100000000),
+          years: Math.round(clamp(toNumber(goalYears), 1, 60))
+        };
+        const goal = useMemo(
+          () =>
+            calculateGoal(
+              parsed.startCapital,
+              parsed.monthlySaving,
+              parsed.annualReturn,
+              parsedGoal.years,
+              parsedGoal.target
+            ),
+          [parsed.startCapital, parsed.monthlySaving, parsed.annualReturn, parsedGoal.years, parsedGoal.target]
+        );
+
+        return (
+          <main>
+            <section className="relative overflow-hidden bg-ink text-white">
+              <div className="absolute inset-0 opacity-30" aria-hidden="true">
+                <div className="h-full w-full bg-[radial-gradient(circle_at_20%_15%,#9ee6c8_0,transparent_30%),linear-gradient(135deg,#10231f_0%,#16483f_58%,#dceef7_130%)]"></div>
+              </div>
+              <div className="relative mx-auto grid min-h-[72vh] max-w-7xl items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+                <div>
+                  <p className="mb-4 inline-flex rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-mint ring-1 ring-white/15">
+                    Svensk ränta-på-ränta-kalkylator
+                  </p>
+                  <h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-normal sm:text-5xl lg:text-6xl">
+                    Se hur ditt sparande kan växa över tid
+                  </h1>
+                  <p className="mt-5 max-w-2xl text-lg leading-8 text-white/78">
+                    Fyll i startkapital, månadssparande, förväntad årlig avkastning och spartid. Kalkylatorn visar
+                    slutvärde, totalt insatt kapital, avkastning och hur mycket du behöver spara för att nå ett mål.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-white/15 bg-white/95 p-5 text-ink shadow-soft sm:p-6">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Startkapital" value={startCapital} setValue={setStartCapital} min="0" max="100000000" step="1000" suffix="kr" />
+                    <Field label="Månadssparande" value={monthlySaving} setValue={setMonthlySaving} min="0" max="1000000" step="100" suffix="kr/mån" />
+                    <Field label="Årlig avkastning" value={annualReturn} setValue={setAnnualReturn} min="-50" max="50" step="0.1" suffix="%" />
+                    <Field label="Antal år" value={years} setValue={setYears} min="1" max="60" step="1" suffix="år" />
+                  </div>
+                  <div className="mt-5 rounded-lg bg-limewash p-4 text-sm leading-6 text-ink/75">
+                    Antagen avkastning: {percent.format(parsed.annualReturn)} % per år, omräknad till månadsvis
+                    ränta-på-ränta i beräkningen.
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+              <SectionIntro eyebrow="Spara pengar över tid" title="Prognos för ditt månadssparande">
+                Se hur startkapital och regelbundet sparande kan utvecklas år för år med ränta-på-ränta. Den här delen
+                svarar på frågan: vad kan mitt sparande bli värt?
+              </SectionIntro>
+              <div className="grid gap-4 md:grid-cols-3">
+                <StatCard label="Totalt insatt kapital" value={currency.format(final.deposited)} />
+                <StatCard label="Vinst från avkastning" value={currency.format(final.gain)} accent="text-copper" />
+                <StatCard label="Beräknat slutvärde" value={currency.format(final.balance)} accent="text-forest" />
+              </div>
+            </section>
+
+            <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6 lg:px-8">
+              <ProjectionChart rows={rows} />
+            </section>
+
+            <GoalPlanner
+              parsed={parsed}
+              parsedGoal={parsedGoal}
+              goalTarget={goalTarget}
+              setGoalTarget={setGoalTarget}
+              goalYears={goalYears}
+              setGoalYears={setGoalYears}
+              goal={goal}
+            />
+
+            <section className="border-y border-ink/10 bg-white">
+              <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 lg:grid-cols-3 lg:px-8">
+                <article>
+                  <h2 className="text-2xl font-semibold">Vad är ränta på ränta?</h2>
+                  <p className="mt-3 leading-7 text-ink/70">
+                    Ränta på ränta betyder att du får avkastning både på pengarna du satt in och på tidigare avkastning.
+                    Ju längre spartid, desto större blir effekten eftersom avkastningen hinner bygga vidare på sig själv.
+                  </p>
+                </article>
+                <article>
+                  <h2 className="text-2xl font-semibold">Varför månadsspara?</h2>
+                  <p className="mt-3 leading-7 text-ink/70">
+                    Ett regelbundet månadssparande gör sparandet enklare att hålla igång och sprider inköpen över olika
+                    marknadslägen. Det kan minska risken att hela kapitalet investeras vid ett enda tillfälle.
+                  </p>
+                </article>
+                <article>
+                  <h2 className="text-2xl font-semibold">Tolka resultatet</h2>
+                  <p className="mt-3 leading-7 text-ink/70">
+                    Kalkylen är en prognos, inte en garanti. Avkastning varierar från år till år och avgifter, skatt och
+                    inflation kan påverka det faktiska värdet av ditt sparande.
+                  </p>
+                </article>
+              </div>
+            </section>
+          </main>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
